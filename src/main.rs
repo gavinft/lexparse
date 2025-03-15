@@ -10,4 +10,5 @@ fn main() {
     let toks = dbg!(lex::lex(input.to_owned(), &word_map));
     let tree = dbg!(parse::parse(toks.as_slice()).unwrap());
     interpret::interpret(&[tree]).unwrap();
+    interpret::interpret(&[parse::parse(lex::lex("print 5 > 2".to_owned(), &word_map).as_slice()).unwrap()]).unwrap();
 }

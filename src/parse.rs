@@ -86,6 +86,8 @@ fn parse_lit(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     let (next, remaining) = toks.eat()?;
     match next {
         Token::Int(i) => Ok((Int(i), remaining)),
+        Token::True => Ok((Bool(true), remaining)),
+        Token::False => Ok((Bool(false), remaining)),
         found => Err(ExpectedExpr(found)),
     }
 }
@@ -134,8 +136,40 @@ fn parse_sum_diff(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     }
 }
 
+fn parse_comp(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
+    let (left, remaining) = parse_sum_diff(toks)?;
+    let next_res = remaining.peek();
+    if next_res.is_ok() {
+        match next_res.unwrap() {
+            Token::LT => {
+                let (right, remaining) = parse_sum_diff(remaining.next()?)?;
+                Ok((CompLT(Box::new(left), Box::new(right)), remaining))
+            },
+            Token::LE => {
+                let (right, remaining) = parse_sum_diff(remaining.next()?)?;
+                Ok((CompLE(Box::new(left), Box::new(right)), remaining))
+            },
+            Token::EQ => {
+                let (right, remaining) = parse_sum_diff(remaining.next()?)?;
+                Ok((CompEQ(Box::new(left), Box::new(right)), remaining))
+            },
+            Token::GE => {
+                let (right, remaining) = parse_sum_diff(remaining.next()?)?;
+                Ok((CompGE(Box::new(left), Box::new(right)), remaining))
+            },
+            Token::GT => {
+                let (right, remaining) = parse_sum_diff(remaining.next()?)?;
+                Ok((CompGT(Box::new(left), Box::new(right)), remaining))
+            },
+            _ => Ok((left, remaining))
+        }
+    } else {
+        Ok((left, remaining))
+    }
+}
+
 fn parse_expr(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
-    parse_sum_diff(toks)
+    parse_comp(toks)
 }
 
 fn parse_stmt(toks: TokenList) -> ParseRes<(Statement, TokenList)> {

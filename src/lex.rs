@@ -80,13 +80,10 @@ enum EatResult {
 }
 
 fn consume_whitespace(text: &str) -> &str {
-    println!("consuming whitespace for: {text}");
     for (i, c) in text.chars().enumerate() {
         if !c.is_whitespace() {
-            println!("{i} not whitespace");
             return &text[i..];
         }
-        println!("{i} IS whitespace");
     }
 
     text
@@ -127,7 +124,6 @@ fn eat_int_lit(text: &mut &str) -> Option<i64> {
             // loop through digits and add to string
             let mut number_str = &text[..1];
             for (i, c) in text.chars().enumerate().skip(1) {
-                println!("reading num. i:{i}, c:{c}");
                 if !c.is_numeric() {
                     break;
                 }
@@ -181,6 +177,16 @@ fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> EatResult {
         EatResult::Token(Token::FSlash)
     } else if matches_tok(text, "%") {
         EatResult::Token(Token::Percent)
+    } else if matches_tok(text, "<=") {
+        EatResult::Token(Token::LE)
+    } else if matches_tok(text, "<") {
+        EatResult::Token(Token::LT)
+    } else if matches_tok(text, "==") {
+        EatResult::Token(Token::EQ)
+    } else if matches_tok(text, ">=") {
+        EatResult::Token(Token::GE)
+    } else if matches_tok(text, ">") {
+        EatResult::Token(Token::GT)
     } else {
         let ch = text
             .chars()
@@ -259,5 +265,7 @@ pub fn default_word_map() -> HashMap<&'static str, Token> {
         ("do", Token::Do),
         ("done", Token::Done),
         ("print", Token::Print),
+        ("true", Token::True),
+        ("false", Token::False),
     ])
 }

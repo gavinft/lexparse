@@ -12,7 +12,13 @@ pub enum Expr {
     Mult(Box<Expr>, Box<Expr>),
     Div(Box<Expr>, Box<Expr>),
     Mod(Box<Expr>, Box<Expr>),
+    CompLT(Box<Expr>, Box<Expr>),
+    CompLE(Box<Expr>, Box<Expr>),
+    CompEQ(Box<Expr>, Box<Expr>),
+    CompGE(Box<Expr>, Box<Expr>),
+    CompGT(Box<Expr>, Box<Expr>),
     Int(i64),
+    Bool(bool),
     Ident(Rc<str>),
 }
 
