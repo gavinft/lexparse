@@ -1,13 +1,13 @@
 use std::error::Error;
 use std::fmt::Display;
 
+use crate::ast::Block;
 use crate::ast::Expr::{self, *};
 use crate::ast::Statement::{self, *};
-use crate::ast::Program;
 
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
-    TypeMismatch
+    TypeMismatch,
 }
 
 impl Error for RuntimeError {}
@@ -25,7 +25,7 @@ fn type_int(e: &Expr) -> InterpRes<i64> {
         Int(i) => Ok(*i),
         Bool(_) => Err(RuntimeError::TypeMismatch),
         Ident(_) => todo!("no idents yet ):"),
-        e => type_int(&resolve_expr(e)?)
+        e => type_int(&resolve_expr(e)?),
     }
 }
 
@@ -34,7 +34,7 @@ fn type_bool(e: &Expr) -> InterpRes<bool> {
         Int(_) => Err(RuntimeError::TypeMismatch),
         Bool(b) => Ok(*b),
         Ident(_) => todo!("no idents yet ):"),
-        e => type_bool(&resolve_expr(e)?)
+        e => type_bool(&resolve_expr(e)?),
     }
 }
 
@@ -65,11 +65,28 @@ fn print_expr(e: &Expr) -> InterpRes<()> {
     }
 }
 
-pub fn interpret(p: &Program) -> InterpRes<()> {
-    for s in p {
-        match s {
-            Print(e) => print_expr(e)?,
-        }
+fn interpret_if(guard: &Expr, if_statement: &Statement, else_statement: Option<&Statement>) -> InterpRes<()> {
+    if type_bool(guard)? {
+        interpret(if_statement)
+    } else if let Some(else_statement) = else_statement {
+        interpret(else_statement)
+    } else {
+        Ok(())
+    }
+}
+
+fn interpret_block(statements: &Block) -> InterpRes<()> {
+    for s in statements {
+        interpret(s)?;
+    }
+    Ok(())
+}
+
+pub fn interpret(p: &Statement) -> InterpRes<()> {
+    match p {
+        Print(e) => print_expr(e)?,
+        If(guard, if_statement, else_statement) => interpret_if(guard, if_statement, else_statement.as_ref().map(|s| s.as_ref()))?,
+        BlockStmt(statements) => interpret_block(statements)?,
     }
     Ok(())
 }

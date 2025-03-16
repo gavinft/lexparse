@@ -1,11 +1,13 @@
 use std::rc::Rc;
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Statement {
     Print(Expr),
+    If(Expr, Box<Statement>, Option<Box<Statement>>),
+    BlockStmt(Box<Block>),
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Expr {
     Sum(Box<Expr>, Box<Expr>),
     Diff(Box<Expr>, Box<Expr>),
@@ -22,4 +24,4 @@ pub enum Expr {
     Ident(Rc<str>),
 }
 
-pub type Program = [Statement];
+pub type Block = [Statement];

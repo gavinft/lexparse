@@ -4,11 +4,13 @@ pub mod lex;
 pub mod parse;
 pub mod token;
 
-fn main() {
-    let input = "print 5 + 5 + 13+-2 * 4 + 5";
+fn execute(prgm: &str) {
     let word_map = lex::default_word_map();
-    let toks = dbg!(lex::lex(input.to_owned(), &word_map));
+    let toks = dbg!(lex::lex(prgm.to_owned(), &word_map));
     let tree = dbg!(parse::parse(toks.as_slice()).unwrap());
-    interpret::interpret(&[tree]).unwrap();
-    interpret::interpret(&[parse::parse(lex::lex("print 5 > 2".to_owned(), &word_map).as_slice()).unwrap()]).unwrap();
+    interpret::interpret(&tree).unwrap();
+}
+
+fn main() {
+    execute("if 2 > 3 then print 1 else print 0 print 2 print 4 fi");
 }

@@ -260,6 +260,8 @@ pub fn lex(text: String, words: &HashMap<&str, Token>) -> Vec<Token> {
 pub fn default_word_map() -> HashMap<&'static str, Token> {
     HashMap::from([
         ("if", Token::If),
+        ("then", Token::Then),
+        ("else", Token::Else),
         ("fi", Token::Fi),
         ("for", Token::For),
         ("do", Token::Do),

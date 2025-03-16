@@ -1,9 +1,11 @@
 use std::rc::Rc;
 
-#[derive(Clone, Hash, Debug)]
+#[derive(Clone, Hash, Debug, PartialEq)]
 pub enum Token {
     Print,
     If,
+    Then,
+    Else,
     Fi,
     For,
     Do,
@@ -30,6 +32,8 @@ impl Token {
         match self {
             Token::Print => "Print",
             Token::If => "If",
+            Token::Then => "Then",
+            Token::Else => "Else",
             Token::Fi => "Fi",
             Token::For => "For",
             Token::Do => "Do",

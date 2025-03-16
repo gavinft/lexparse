@@ -9,6 +9,7 @@ pub enum ParseError {
     ExpectedEof(Token),
     ExpectedStatement(Token),
     ExpectedExpr(Token),
+    ExpectedTok(Token, Token),
 }
 
 impl Error for ParseError {}
@@ -21,21 +22,29 @@ impl Display for ParseError {
                 write!(
                     f,
                     "A statement was expected, but a \'{}\' token was found instead",
-                    { tok.kind() }
+                    tok.kind()
                 )
             }
             Self::ExpectedExpr(tok) => {
                 write!(
                     f,
                     "An expression was expected, but a \'{}\' token was found instead",
-                    { tok.kind() }
+                    tok.kind()
                 )
             }
             Self::ExpectedEof(tok) => {
                 write!(
                     f,
                     "The end of the file was expected, but a \'{}\' token was found instead",
-                    { tok.kind() }
+                    tok.kind()
+                )
+            }
+            Self::ExpectedTok(expected, received) => {
+                write!(
+                    f,
+                    "A '{}' token was expected, but a '{}' was found instead",
+                    expected.kind(),
+                    received.kind()
                 )
             }
         }
@@ -72,6 +81,14 @@ impl<'a> TokenList<'a> {
             Ok(TokenList {
                 ptr: &self.ptr[1..],
             })
+        }
+    }
+    pub fn expect(self, tok: Token) -> ParseRes<TokenList<'a>> {
+        let (next, remaining) = self.eat()?;
+        if next == tok {
+            Ok(remaining)
+        } else {
+            Err(ExpectedTok(tok, next))
         }
     }
     // pub fn lookahead(&self, n: usize) -> ParseRes<Token> {
@@ -144,24 +161,24 @@ fn parse_comp(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
             Token::LT => {
                 let (right, remaining) = parse_sum_diff(remaining.next()?)?;
                 Ok((CompLT(Box::new(left), Box::new(right)), remaining))
-            },
+            }
             Token::LE => {
                 let (right, remaining) = parse_sum_diff(remaining.next()?)?;
                 Ok((CompLE(Box::new(left), Box::new(right)), remaining))
-            },
+            }
             Token::EQ => {
                 let (right, remaining) = parse_sum_diff(remaining.next()?)?;
                 Ok((CompEQ(Box::new(left), Box::new(right)), remaining))
-            },
+            }
             Token::GE => {
                 let (right, remaining) = parse_sum_diff(remaining.next()?)?;
                 Ok((CompGE(Box::new(left), Box::new(right)), remaining))
-            },
+            }
             Token::GT => {
                 let (right, remaining) = parse_sum_diff(remaining.next()?)?;
                 Ok((CompGT(Box::new(left), Box::new(right)), remaining))
-            },
-            _ => Ok((left, remaining))
+            }
+            _ => Ok((left, remaining)),
         }
     } else {
         Ok((left, remaining))
@@ -172,15 +189,47 @@ fn parse_expr(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     parse_comp(toks)
 }
 
+fn parse_if(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
+    let (guard, remaining) = parse_expr(toks)?;
+    let remaining = remaining.expect(Token::Then)?;
+    let (block, remaining) = parse_block(remaining, Some(&[Token::Fi, Token::Else]))?;
+    Ok(
+        if let Token::Else = remaining
+            .peek()
+            .expect("there should be another token in the list")
+        {
+            let remaining = remaining.next()?;
+            use Token as T;
+            match remaining.peek()? {
+                T::If => {
+                    let (else_if, remaining) = parse_stmt(remaining)?;
+                    (
+                        If(guard, Box::new(block), Some(Box::new(else_if))),
+                        remaining,
+                    )
+                }
+                _ => {
+                    let (else_block, remaining) = parse_block(remaining, Some(&[Token::Fi]))?;
+                    (
+                        If(guard, Box::new(block), Some(Box::new(else_block))),
+                        // last token is fi
+                        remaining.next()?,
+                    )
+                }
+            }
+        } else {
+            // token is fi
+            (If(guard, Box::new(block), None), remaining.next()?)
+        },
+    )
+}
+
 fn parse_stmt(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
     let (tok, rem) = toks.eat()?;
     Ok(match tok {
-        Token::If => todo!(),
-        Token::Fi => todo!(),
+        Token::If => parse_if(rem)?,
         Token::For => todo!(),
         Token::Do => todo!(),
-        Token::Done => todo!(),
-        Token::Plus => todo!(),
         Token::Ident(_) => todo!("variable equals, func call"),
         Token::Print => {
             let (expr, rem) = parse_expr(rem)?;
@@ -190,20 +239,39 @@ fn parse_stmt(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
     })
 }
 
-fn parse_global(toks: TokenList) -> ParseRes<Statement> {
-    let (stmt, rem) = parse_stmt(toks)?;
+fn parse_block<'a>(
+    toks: TokenList<'a>,
+    closing_toks: Option<&[Token]>,
+) -> ParseRes<(Statement, TokenList<'a>)> {
+    let mut statements = Vec::new();
+    let mut rem_toks = toks;
 
-    if !rem.empty() {
-        Err(ExpectedEof(
-            rem.peek()
-                .expect("rem should not be empty so peek should succeed"),
-        ))
-    } else {
-        Ok(stmt)
+    fn should_continue(rem_toks: &TokenList, closing_toks: Option<&[Token]>) -> bool {
+        dbg!(rem_toks.empty());
+        dbg!(closing_toks);
+        dbg!(rem_toks.peek());
+
+        !rem_toks.empty()
+            && if let Some(closing_toks) = closing_toks {
+                !closing_toks.contains(&rem_toks.peek().expect("rem_toks shouldn't be empty"))
+            } else {
+                true
+            }
     }
+
+    while should_continue(&rem_toks, closing_toks) {
+        println!("continuing");
+        let (stmt, remaining) = parse_stmt(rem_toks)?;
+        println!("parsed statement: {stmt:?}");
+        statements.push(stmt);
+        rem_toks = remaining;
+    }
+
+    Ok((BlockStmt(statements.into()), rem_toks))
 }
 
 pub fn parse(toks: &[Token]) -> ParseRes<Statement> {
     let tok_lst = TokenList::from(toks);
-    parse_global(tok_lst)
+    let (stmt, _) = parse_block(tok_lst, None)?;
+    Ok(stmt)
 }
