@@ -86,7 +86,7 @@ fn consume_whitespace(text: &str) -> &str {
         }
     }
 
-    text
+    &text[text.len()..]
 }
 
 /**
