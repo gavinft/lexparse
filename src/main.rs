@@ -4,6 +4,8 @@ pub mod lex;
 pub mod parse;
 pub mod token;
 
+use std::fs;
+
 fn execute(prgm: &str) {
     let word_map = lex::default_word_map();
     let toks = dbg!(lex::lex(prgm.to_owned(), &word_map));
@@ -12,5 +14,6 @@ fn execute(prgm: &str) {
 }
 
 fn main() {
-    execute("if 2 > 3 then print 1 else print 0 print 2 print 4 fi");
+    let prgm = fs::read_to_string("program.p").unwrap();
+    execute(prgm.as_ref());
 }
