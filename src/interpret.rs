@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Display;
 use std::rc::Rc;
 
@@ -8,16 +7,51 @@ use crate::ast::Expr::{self, *};
 use crate::ast::Statement::{self, *};
 use crate::error::BacktracedError;
 
+#[derive(Debug, Clone, Hash)]
+pub enum Type {
+    Int,
+    Bool,
+    String,
+}
+
+trait TryIntoWith<R, U> {
+    fn try_into_with(self, uses: U) -> R;
+}
+
+impl TryIntoWith<InterpRes<Type>, &InterpreterState> for &Expr {
+    fn try_into_with(self, state: &InterpreterState) -> InterpRes<Type> {
+        Ok(match self {
+            Sum(..) => Type::Int,
+            Diff(..) => Type::Int,
+            Mult(..) => Type::Int,
+            Div(..) => Type::Int,
+            Mod(..) => Type::Int,
+            CompLT(..) => Type::Bool,
+            CompLE(..) => Type::Bool,
+            CompEQ(..) => Type::Bool,
+            CompGE(..) => Type::Bool,
+            CompGT(..) => Type::Bool,
+            Int(_) => Type::Int,
+            Bool(_) => Type::Bool,
+            String(_) => Type::String,
+            Ident(name) => state.get_var_type(name)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum RuntimeErrorKind {
-    TypeMismatch,
+    TypeMismatch(Type, Type),
     InvalidVariableName(Rc<str>),
 }
 
 impl Display for RuntimeErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TypeMismatch => write!(f, "Type mismatch"),
+            Self::TypeMismatch(expected, received) => write!(
+                f,
+                "Type mismatch: expected {expected:?}, received {received:?}"
+            ),
             Self::InvalidVariableName(name) => {
                 write!(f, "Invalid variable name \"{name}\"")
             }
@@ -37,7 +71,10 @@ impl FiniteType<i64> for i64 {
     fn convert(state: InterpreterState, e: &Expr) -> InterpRes<(i64, InterpreterState)> {
         match e {
             Int(i) => Ok((*i, state)),
-            Bool(_) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch)),
+            Bool(_) | String(_) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch(
+                Type::Int,
+                e.try_into_with(&state)?,
+            ))),
             e => {
                 let (value, state) = state.resolve_expr(e)?;
                 Self::convert(state, &value)
@@ -49,7 +86,10 @@ impl FiniteType<i64> for i64 {
 impl FiniteType<bool> for bool {
     fn convert(state: InterpreterState, e: &Expr) -> InterpRes<(bool, InterpreterState)> {
         match e {
-            Int(_) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch)),
+            Int(_) | String(_) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch(
+                Type::Bool,
+                e.try_into_with(&state)?,
+            ))),
             Bool(b) => Ok((*b, state)),
             e => {
                 let (value, state) = state.resolve_expr(e)?;
@@ -89,11 +129,14 @@ impl InterpreterState {
         match e {
             Int(i) => Ok((Int(*i), self)),
             Bool(b) => Ok((Bool(*b), self)),
+            String(s) => Ok((String(s.clone()), self)),
             Ident(s) => {
                 let e_res = self
                     .vars
                     .get(s)
-                    .ok_or_else(|| RuntimeError::new(RuntimeErrorKind::InvalidVariableName(s.clone())))
+                    .ok_or_else(|| {
+                        RuntimeError::new(RuntimeErrorKind::InvalidVariableName(s.clone()))
+                    })
                     .map(|e| e.clone());
                 e_res.map(|e| (e, self))
             }
@@ -111,6 +154,12 @@ impl InterpreterState {
         }
     }
 
+    fn get_var_type(&self, name: &Rc<str>) -> InterpRes<Type> {
+        let e = self.vars.get(name);
+        e.ok_or_else(|| RuntimeError::new(RuntimeErrorKind::InvalidVariableName(name.clone())))
+            .and_then(|e| e.try_into_with(self))
+    }
+
     fn print_expr(self, e: &Expr) -> InterpRes<InterpreterState> {
         match e {
             Int(i) => {
@@ -119,6 +168,10 @@ impl InterpreterState {
             }
             Bool(b) => {
                 println!("{b}");
+                Ok(self)
+            }
+            String(s) => {
+                println!("{s}");
                 Ok(self)
             }
             other => {

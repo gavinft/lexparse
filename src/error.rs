@@ -1,7 +1,7 @@
 use std::{
     backtrace::Backtrace,
     error::Error,
-    fmt::{Debug, Display, Pointer},
+    fmt::{Debug, Display},
 };
 
 pub struct BacktracedError<T: Display + Debug> {
@@ -12,9 +12,9 @@ pub struct BacktracedError<T: Display + Debug> {
 impl<T: Display + Debug> BacktracedError<T> {
     #[track_caller]
     pub fn new(err: T) -> BacktracedError<T> {
-        BacktracedError { 
-            err: err, 
-            backtrace: Backtrace::capture()
+        BacktracedError {
+            err: err,
+            backtrace: Backtrace::capture(),
         }
     }
 }

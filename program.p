@@ -1,1 +1,5 @@
-if 13 then print 1 else print "hello world" fi
+let hello = 5
+let word = "lmao"
+let hello = hello + 1
+print hello
+print word

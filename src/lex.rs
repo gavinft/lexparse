@@ -76,13 +76,15 @@ mod charlist {
 
 #[derive(Debug, Clone)]
 pub enum LexErrorKind {
-    UnclosedStringLit
+    UnclosedStringLit,
 }
 
 impl Display for LexErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LexErrorKind::UnclosedStringLit => write!(f, "The string literal is missing a closing quotation mark"),
+            LexErrorKind::UnclosedStringLit => {
+                write!(f, "The string literal is missing a closing quotation mark")
+            }
         }
     }
 }
@@ -139,7 +141,9 @@ fn eat_str_lit(text: &mut &str) -> LexRes<Rc<str>> {
         }
     }
     // if we found slice, return, otherwise give error
-    lit_slice.ok_or_else(|| LexError::new(LexErrorKind::UnclosedStringLit)).map(|slice| Rc::from(slice))
+    lit_slice
+        .ok_or_else(|| LexError::new(LexErrorKind::UnclosedStringLit))
+        .map(|slice| Rc::from(slice))
 }
 
 fn eat_int_lit(text: &mut &str) -> Option<i64> {

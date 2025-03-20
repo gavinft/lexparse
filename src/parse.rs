@@ -1,8 +1,8 @@
-use std::fmt::Display;
+use self::ParseErrorKind::*;
 use crate::ast::{Expr::*, Statement::*, *};
 use crate::error::BacktracedError;
 use crate::token::Token;
-use self::ParseErrorKind::*;
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub enum ParseErrorKind {
@@ -72,7 +72,10 @@ impl<'a> TokenList<'a> {
         TokenList { ptr: lst }
     }
     pub fn peek(&self) -> ParseRes<Token> {
-        self.ptr.first().map(|t| t.clone()).ok_or(ParseError::new(Eof))
+        self.ptr
+            .first()
+            .map(|t| t.clone())
+            .ok_or(ParseError::new(Eof))
     }
     pub fn eat(self) -> ParseRes<(Token, TokenList<'a>)> {
         let tok = self.ptr.first().ok_or(ParseError::new(Eof))?.clone();
@@ -114,6 +117,7 @@ fn parse_lit_or_ident(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
         Token::IntLit(i) => Ok((Int(i), remaining)),
         Token::True => Ok((Bool(true), remaining)),
         Token::False => Ok((Bool(false), remaining)),
+        Token::StringLit(s) => Ok((String(s), remaining)),
         Token::Ident(name) => Ok((Ident(name), remaining)),
         found => Err(ParseError::new(ExpectedExpr(found))),
     }

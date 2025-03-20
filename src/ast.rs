@@ -22,6 +22,7 @@ pub enum Expr {
     CompGT(Box<Expr>, Box<Expr>),
     Int(i64),
     Bool(bool),
+    String(Rc<str>),
     Ident(Rc<str>),
 }
 
