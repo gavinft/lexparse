@@ -9,6 +9,7 @@ use crate::error::BacktracedError;
 
 #[derive(Debug, Clone, Hash)]
 pub enum Type {
+    Unit,
     Int,
     Bool,
     String,
@@ -19,6 +20,9 @@ trait TryIntoWith<R, U> {
 }
 
 impl TryIntoWith<InterpRes<Type>, &InterpreterState> for &Expr {
+    /**
+     * Converts an expression into its type
+     */
     fn try_into_with(self, state: &InterpreterState) -> InterpRes<Type> {
         Ok(match self {
             Sum(..) => Type::Int,
@@ -34,7 +38,18 @@ impl TryIntoWith<InterpRes<Type>, &InterpreterState> for &Expr {
             Int(_) => Type::Int,
             Bool(_) => Type::Bool,
             String(_) => Type::String,
+            Unit => Type::Unit,
             Ident(name) => state.get_var_type(name)?,
+            Stmt(statement) => match &**statement {
+                Print(_) => Type::Unit,
+                HalfIf(..) => Type::Unit,
+                FullIf(_, _, else_clause_expr) => else_clause_expr.try_into_with(state)?,
+                Assign(..) => Type::Unit,
+                BlockStmt(exprs) => exprs
+                    .last()
+                    .map(|e| e.try_into_with(state))
+                    .unwrap_or(Ok(Type::Unit))?,
+            },
         })
     }
 }
@@ -108,8 +123,8 @@ impl InterpreterState {
     fn execute1<T: FiniteType<T>>(
         self,
         e: &Expr,
-        f: impl FnOnce(InterpreterState, T) -> InterpRes<InterpreterState>,
-    ) -> InterpRes<InterpreterState> {
+        f: impl FnOnce(InterpreterState, T) -> InterpRes<(Expr, InterpreterState)>,
+    ) -> InterpRes<(Expr, InterpreterState)> {
         let (val, state) = T::convert(self, e)?;
         f(state, val)
     }
@@ -130,6 +145,7 @@ impl InterpreterState {
             Int(i) => Ok((Int(*i), self)),
             Bool(b) => Ok((Bool(*b), self)),
             String(s) => Ok((String(s.clone()), self)),
+            Unit => Ok((Unit, self)),
             Ident(s) => {
                 let e_res = self
                     .vars
@@ -140,7 +156,6 @@ impl InterpreterState {
                     .map(|e| e.clone());
                 e_res.map(|e| (e, self))
             }
-
             Sum(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left + right)),
             Diff(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left - right)),
             Mult(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left * right)),
@@ -151,6 +166,7 @@ impl InterpreterState {
             CompEQ(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left == right)),
             CompGE(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left >= right)),
             CompGT(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left > right)),
+            Stmt(_) => Self::interpret(self, e),
         }
     }
 
@@ -181,51 +197,79 @@ impl InterpreterState {
         }
     }
 
-    fn interpret_if(
+    fn interpret_partial_if(
         state: InterpreterState,
         guard: &Expr,
-        if_statement: &Statement,
-        else_statement_opt: Option<&Statement>,
-    ) -> InterpRes<InterpreterState> {
+        if_statement: &Expr,
+        else_statement_opt: Option<&Expr>,
+    ) -> InterpRes<(Expr, InterpreterState)> {
         state.execute1(guard, |state, guard: bool| {
             if guard {
-                Self::interpret(state, if_statement)
+                let (_, state) = state.resolve_expr(if_statement)?;
+                Ok((Unit, state))
             } else if let Some(else_statement) = else_statement_opt {
-                Self::interpret(state, else_statement)
+                let (_, state) = state.resolve_expr(else_statement)?;
+                Ok((Unit, state))
             } else {
-                Ok(state)
+                Ok((Unit, state))
             }
         })
     }
 
-    fn interpret_block(state: InterpreterState, statements: &Block) -> InterpRes<InterpreterState> {
-        let mut state = state;
-        for s in statements {
-            state = Self::interpret(state, s)?;
-        }
-        Ok(state)
+    fn interpret_full_if(
+        state: InterpreterState,
+        guard: &Expr,
+        if_statement: &Expr,
+        else_statement: &Expr,
+    ) -> InterpRes<(Expr, InterpreterState)> {
+        state.execute1(guard, |state, guard: bool| {
+            if guard {
+                state.resolve_expr(if_statement)
+            } else {
+                state.resolve_expr(else_statement)
+            }
+        })
     }
 
-    pub fn interpret(state: InterpreterState, p: &Statement) -> InterpRes<InterpreterState> {
-        match p {
-            Print(e) => state.print_expr(e),
-            If(guard, if_statement, else_statement) => Self::interpret_if(
-                state,
-                guard,
-                if_statement,
-                else_statement.as_ref().map(|s| s.as_ref()),
-            ),
-            BlockStmt(statements) => Self::interpret_block(state, statements),
-            Assign(name, expr) => {
-                let (resolved_expr, mut state) = state.resolve_expr(expr)?;
-                state.vars.insert(name.clone(), resolved_expr);
-                Ok(state)
+    fn interpret_block(
+        state: InterpreterState,
+        statements: &Block,
+    ) -> InterpRes<(Expr, InterpreterState)> {
+        let mut state = state;
+        let mut ret = Unit;
+        for s in statements {
+            (ret, state) = Self::interpret(state, s)?;
+        }
+        Ok((ret, state))
+    }
+
+    pub fn interpret(state: InterpreterState, p: &Expr) -> InterpRes<(Expr, InterpreterState)> {
+        if let Stmt(s) = p {
+            match &**s {
+                Print(e) => {
+                    let state = state.print_expr(e)?;
+                    Ok((Unit, state))
+                }
+                HalfIf(guard, if_statement, else_statement) => {
+                    Self::interpret_partial_if(state, guard, if_statement, else_statement.as_ref())
+                }
+                FullIf(guard, if_statement, else_statement) => {
+                    Self::interpret_full_if(state, guard, if_statement, else_statement)
+                }
+                BlockStmt(statements) => Self::interpret_block(state, statements),
+                Assign(name, expr) => {
+                    let (resolved_expr, mut state) = state.resolve_expr(expr)?;
+                    state.vars.insert(name.clone(), resolved_expr);
+                    Ok((Unit, state))
+                }
             }
+        } else {
+            state.resolve_expr(p)
         }
     }
 }
 
-pub fn interpret(p: &Statement) -> InterpRes<()> {
+pub fn interpret(p: &Expr) -> InterpRes<()> {
     let _ = InterpreterState::interpret(InterpreterState::default(), p)?;
     Ok(())
 }

@@ -3,13 +3,15 @@ use std::rc::Rc;
 #[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Statement {
     Print(Expr),
-    If(Expr, Box<Statement>, Option<Box<Statement>>),
+    HalfIf(Expr, Expr, Option<Expr>),
+    FullIf(Expr, Expr, Expr),
     Assign(Rc<str>, Expr),
     BlockStmt(Box<Block>),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq)]
 pub enum Expr {
+    Stmt(Box<Statement>),
     Sum(Box<Expr>, Box<Expr>),
     Diff(Box<Expr>, Box<Expr>),
     Mult(Box<Expr>, Box<Expr>),
@@ -23,7 +25,9 @@ pub enum Expr {
     Int(i64),
     Bool(bool),
     String(Rc<str>),
+    Unit,
+
     Ident(Rc<str>),
 }
 
-pub type Block = [Statement];
+pub type Block = [Expr];

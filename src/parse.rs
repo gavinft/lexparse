@@ -199,11 +199,7 @@ fn parse_comp(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     }
 }
 
-fn parse_expr(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
-    parse_comp(toks)
-}
-
-fn parse_if(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
+fn parse_if(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     let (guard, remaining) = parse_expr(toks)?;
     let remaining = remaining.expect(Token::Then)?;
     let (block, remaining) = parse_block(remaining, Some(&[Token::Fi, Token::Else]))?;
@@ -217,15 +213,36 @@ fn parse_if(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
             match remaining.peek()? {
                 T::If => {
                     let (else_if, remaining) = parse_stmt(remaining)?;
-                    (
-                        If(guard, Box::new(block), Some(Box::new(else_if))),
-                        remaining,
-                    )
+                    if let Stmt(else_if_stmt) = &else_if {
+                        if let FullIf(..) = **else_if_stmt {
+                            (
+                                Stmt(Box::new(FullIf(guard, Stmt(Box::new(block)), else_if))),
+                                remaining,
+                            )
+                        } else {
+                            (
+                                Stmt(Box::new(HalfIf(
+                                    guard,
+                                    Stmt(Box::new(block)),
+                                    Some(else_if),
+                                ))),
+                                remaining,
+                            )
+                        }
+                    } else {
+                        // this only runs if somehow we successfully parsed the else if clause but
+                        // somehow it's not a statement (should be impossible)
+                        panic!("else if statement is not actually a statement");
+                    }
                 }
                 _ => {
                     let (else_block, remaining) = parse_block(remaining, Some(&[Token::Fi]))?;
                     (
-                        If(guard, Box::new(block), Some(Box::new(else_block))),
+                        Stmt(Box::new(FullIf(
+                            guard,
+                            Stmt(Box::new(block)),
+                            Stmt(Box::new(else_block)),
+                        ))),
                         // last token is fi
                         remaining.next()?,
                     )
@@ -233,37 +250,45 @@ fn parse_if(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
             }
         } else {
             // token is fi
-            (If(guard, Box::new(block), None), remaining.next()?)
+            (
+                Stmt(Box::new(HalfIf(guard, Stmt(Box::new(block)), None))),
+                remaining.next()?,
+            )
         },
     )
 }
 
-fn parse_let(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
+fn parse_let(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     let (next, remaining) = toks.eat()?;
     match next {
         Token::Ident(name) => {
             let remaining = remaining.expect(Token::AssignEq)?;
             let (value, remaining) = parse_expr(remaining)?;
-            Ok((Assign(name.clone(), value), remaining))
+            Ok((Stmt(Box::new(Assign(name.clone(), value))), remaining))
         }
         tok => Err(ParseError::new(ExpectedIdent(tok))),
     }
 }
 
-fn parse_stmt(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
-    let (tok, rem) = toks.eat()?;
+fn parse_stmt(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
+    let tok = toks.peek()?;
     Ok(match tok {
-        Token::If => parse_if(rem)?,
+        Token::If => parse_if(toks.next()?)?,
         Token::For => todo!(),
         Token::Do => todo!(),
-        Token::Let => parse_let(rem)?,
-        Token::Ident(_) => todo!("variable equals, func call"),
+        Token::Let => parse_let(toks.next()?)?,
+        // Token::Ident(_) => todo!("variable equals, func call"), // TODO: implement reassignment (function call can be parse_expr)
         Token::Print => {
-            let (expr, rem) = parse_expr(rem)?;
-            (Print(expr), rem)
+            let (expr, rem) = parse_expr(toks.next()?)?;
+            (Stmt(Box::new(Print(expr))), rem)
         }
-        tok => Err(ParseError::new(ExpectedStatement(tok)))?,
+        // tok => Err(ParseError::new(ExpectedStatement(tok)))?,
+        _ => parse_comp(toks)?,
     })
+}
+
+fn parse_expr(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
+    parse_stmt(toks)
 }
 
 fn parse_block<'a>(
@@ -297,8 +322,8 @@ fn parse_block<'a>(
     Ok((BlockStmt(statements.into()), rem_toks))
 }
 
-pub fn parse(toks: &[Token]) -> ParseRes<Statement> {
+pub fn parse(toks: &[Token]) -> ParseRes<Expr> {
     let tok_lst = TokenList::from(toks);
     let (stmt, _) = parse_block(tok_lst, None)?;
-    Ok(stmt)
+    Ok(Stmt(Box::new(stmt)))
 }
