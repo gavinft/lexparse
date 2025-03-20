@@ -8,12 +8,12 @@ portions for things like game objects or components.
 
 * Int, bool, string
 * Expressions
-* * Adding, subtracting, multiplying, dividing, modulo
-* * Comparing (less than, less than or equal, equal, etc.)
+ * Adding, subtracting, multiplying, dividing, modulo
+ * Comparing (less than, less than or equal, equal, etc.)
 * If/else if/else statement
-* * If the if statement covers all cases (has an else clause) then it can return a value
+ * If the if statement covers all cases (has an else clause) then it can return a value
 * Variable assignment (`let var = expression`)
-* * There's no reassignment yet, but with the current implementation you can just assign twice
+ * There's no reassignment yet, but with the current implementation you can just assign twice
 
 ## Example
 
