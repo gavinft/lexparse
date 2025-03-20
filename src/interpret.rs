@@ -1,92 +1,178 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
+use std::rc::Rc;
 
 use crate::ast::Block;
 use crate::ast::Expr::{self, *};
 use crate::ast::Statement::{self, *};
+use crate::error::BacktracedError;
 
 #[derive(Debug, Clone)]
-pub enum RuntimeError {
+pub enum RuntimeErrorKind {
     TypeMismatch,
+    InvalidVariableName(Rc<str>),
 }
 
-impl Error for RuntimeError {}
-
-impl Display for RuntimeError {
+impl Display for RuntimeErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Type mismatch")
+        match self {
+            Self::TypeMismatch => write!(f, "Type mismatch"),
+            Self::InvalidVariableName(name) => {
+                write!(f, "Invalid variable name \"{name}\"")
+            }
+        }
     }
 }
 
-type InterpRes<T> = Result<T, RuntimeError>;
+pub type RuntimeError = BacktracedError<RuntimeErrorKind>;
 
-fn type_int(e: &Expr) -> InterpRes<i64> {
-    match e {
-        Int(i) => Ok(*i),
-        Bool(_) => Err(RuntimeError::TypeMismatch),
-        Ident(_) => todo!("no idents yet ):"),
-        e => type_int(&resolve_expr(e)?),
+pub type InterpRes<T> = Result<T, RuntimeError>;
+
+trait FiniteType<T> {
+    fn convert(state: InterpreterState, e: &Expr) -> InterpRes<(T, InterpreterState)>;
+}
+
+impl FiniteType<i64> for i64 {
+    fn convert(state: InterpreterState, e: &Expr) -> InterpRes<(i64, InterpreterState)> {
+        match e {
+            Int(i) => Ok((*i, state)),
+            Bool(_) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch)),
+            e => {
+                let (value, state) = state.resolve_expr(e)?;
+                Self::convert(state, &value)
+            }
+        }
     }
 }
 
-fn type_bool(e: &Expr) -> InterpRes<bool> {
-    match e {
-        Int(_) => Err(RuntimeError::TypeMismatch),
-        Bool(b) => Ok(*b),
-        Ident(_) => todo!("no idents yet ):"),
-        e => type_bool(&resolve_expr(e)?),
+impl FiniteType<bool> for bool {
+    fn convert(state: InterpreterState, e: &Expr) -> InterpRes<(bool, InterpreterState)> {
+        match e {
+            Int(_) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch)),
+            Bool(b) => Ok((*b, state)),
+            e => {
+                let (value, state) = state.resolve_expr(e)?;
+                Self::convert(state, &value)
+            }
+        }
     }
 }
 
-fn resolve_expr(e: &Expr) -> InterpRes<Expr> {
-    match e {
-        Sum(left, right) => Ok(Int(type_int(left)? + type_int(right)?)),
-        Diff(left, right) => Ok(Int(type_int(left)? - type_int(right)?)),
-        Mult(left, right) => Ok(Int(type_int(left)? * type_int(right)?)),
-        Div(left, right) => Ok(Int(type_int(left)? / type_int(right)?)),
-        Mod(left, right) => Ok(Int(type_int(left)? % type_int(right)?)),
-        CompLT(left, right) => Ok(Bool(type_int(left)? < type_int(right)?)),
-        CompLE(left, right) => Ok(Bool(type_int(left)? <= type_int(right)?)),
-        CompEQ(left, right) => Ok(Bool(type_int(left)? == type_int(right)?)),
-        CompGE(left, right) => Ok(Bool(type_int(left)? >= type_int(right)?)),
-        CompGT(left, right) => Ok(Bool(type_int(left)? > type_int(right)?)),
-        Int(i) => Ok(Int(*i)),
-        Bool(b) => Ok(Bool(*b)),
-        Ident(_) => todo!(),
-    }
+#[derive(Debug, Clone, Default)]
+struct InterpreterState {
+    vars: HashMap<Rc<str>, Expr>,
 }
 
-fn print_expr(e: &Expr) -> InterpRes<()> {
-    match e {
-        Int(i) => Ok(println!("{i}")),
-        Bool(b) => Ok(println!("{b}")),
-        Ident(_) => todo!(),
-        other => print_expr(&resolve_expr(other)?),
+impl InterpreterState {
+    fn execute1<T: FiniteType<T>>(
+        self,
+        e: &Expr,
+        f: impl FnOnce(InterpreterState, T) -> InterpRes<InterpreterState>,
+    ) -> InterpRes<InterpreterState> {
+        let (val, state) = T::convert(self, e)?;
+        f(state, val)
     }
-}
 
-fn interpret_if(guard: &Expr, if_statement: &Statement, else_statement: Option<&Statement>) -> InterpRes<()> {
-    if type_bool(guard)? {
-        interpret(if_statement)
-    } else if let Some(else_statement) = else_statement {
-        interpret(else_statement)
-    } else {
-        Ok(())
+    fn compute2<T: FiniteType<T>, U: FiniteType<U>>(
+        self,
+        et: &Expr,
+        eu: &Expr,
+        f: impl FnOnce(T, U) -> Expr,
+    ) -> InterpRes<(Expr, Self)> {
+        let (valt, state) = T::convert(self, et)?;
+        let (valu, state) = U::convert(state, eu)?;
+        Ok((f(valt, valu), state))
     }
-}
 
-fn interpret_block(statements: &Block) -> InterpRes<()> {
-    for s in statements {
-        interpret(s)?;
+    pub fn resolve_expr(self, e: &Expr) -> InterpRes<(Expr, Self)> {
+        match e {
+            Int(i) => Ok((Int(*i), self)),
+            Bool(b) => Ok((Bool(*b), self)),
+            Ident(s) => {
+                let e_res = self
+                    .vars
+                    .get(s)
+                    .ok_or_else(|| RuntimeError::new(RuntimeErrorKind::InvalidVariableName(s.clone())))
+                    .map(|e| e.clone());
+                e_res.map(|e| (e, self))
+            }
+
+            Sum(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left + right)),
+            Diff(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left - right)),
+            Mult(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left * right)),
+            Div(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left / right)),
+            Mod(l, r) => self.compute2(l, r, |left: i64, right: i64| Int(left % right)),
+            CompLT(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left < right)),
+            CompLE(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left <= right)),
+            CompEQ(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left == right)),
+            CompGE(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left >= right)),
+            CompGT(l, r) => self.compute2(l, r, |left: i64, right: i64| Bool(left > right)),
+        }
     }
-    Ok(())
+
+    fn print_expr(self, e: &Expr) -> InterpRes<InterpreterState> {
+        match e {
+            Int(i) => {
+                println!("{i}");
+                Ok(self)
+            }
+            Bool(b) => {
+                println!("{b}");
+                Ok(self)
+            }
+            other => {
+                let (e, state) = self.resolve_expr(other)?;
+                state.print_expr(&e)
+            }
+        }
+    }
+
+    fn interpret_if(
+        state: InterpreterState,
+        guard: &Expr,
+        if_statement: &Statement,
+        else_statement_opt: Option<&Statement>,
+    ) -> InterpRes<InterpreterState> {
+        state.execute1(guard, |state, guard: bool| {
+            if guard {
+                Self::interpret(state, if_statement)
+            } else if let Some(else_statement) = else_statement_opt {
+                Self::interpret(state, else_statement)
+            } else {
+                Ok(state)
+            }
+        })
+    }
+
+    fn interpret_block(state: InterpreterState, statements: &Block) -> InterpRes<InterpreterState> {
+        let mut state = state;
+        for s in statements {
+            state = Self::interpret(state, s)?;
+        }
+        Ok(state)
+    }
+
+    pub fn interpret(state: InterpreterState, p: &Statement) -> InterpRes<InterpreterState> {
+        match p {
+            Print(e) => state.print_expr(e),
+            If(guard, if_statement, else_statement) => Self::interpret_if(
+                state,
+                guard,
+                if_statement,
+                else_statement.as_ref().map(|s| s.as_ref()),
+            ),
+            BlockStmt(statements) => Self::interpret_block(state, statements),
+            Assign(name, expr) => {
+                let (resolved_expr, mut state) = state.resolve_expr(expr)?;
+                state.vars.insert(name.clone(), resolved_expr);
+                Ok(state)
+            }
+        }
+    }
 }
 
 pub fn interpret(p: &Statement) -> InterpRes<()> {
-    match p {
-        Print(e) => print_expr(e)?,
-        If(guard, if_statement, else_statement) => interpret_if(guard, if_statement, else_statement.as_ref().map(|s| s.as_ref()))?,
-        BlockStmt(statements) => interpret_block(statements)?,
-    }
+    let _ = InterpreterState::interpret(InterpreterState::default(), p)?;
     Ok(())
 }

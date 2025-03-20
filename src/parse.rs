@@ -1,20 +1,20 @@
-use self::ParseError::*;
+use std::fmt::Display;
 use crate::ast::{Expr::*, Statement::*, *};
+use crate::error::BacktracedError;
 use crate::token::Token;
-use std::{error::Error, fmt::Display};
+use self::ParseErrorKind::*;
 
 #[derive(Debug, Clone)]
-pub enum ParseError {
+pub enum ParseErrorKind {
     Eof,
     ExpectedEof(Token),
     ExpectedStatement(Token),
     ExpectedExpr(Token),
     ExpectedTok(Token, Token),
+    ExpectedIdent(Token),
 }
 
-impl Error for ParseError {}
-
-impl Display for ParseError {
+impl Display for ParseErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Eof => write!(f, "Parser reached end of file but more input was expected"),
@@ -47,9 +47,18 @@ impl Display for ParseError {
                     received.kind()
                 )
             }
+            Self::ExpectedIdent(received) => {
+                write!(
+                    f,
+                    "An identifier was expected, but a \'{}\' token was found instead",
+                    received.kind()
+                )
+            }
         }
     }
 }
+
+pub type ParseError = BacktracedError<ParseErrorKind>;
 
 pub type ParseRes<T> = Result<T, ParseError>;
 
@@ -63,10 +72,10 @@ impl<'a> TokenList<'a> {
         TokenList { ptr: lst }
     }
     pub fn peek(&self) -> ParseRes<Token> {
-        self.ptr.first().map(|t| t.clone()).ok_or(Eof)
+        self.ptr.first().map(|t| t.clone()).ok_or(ParseError::new(Eof))
     }
     pub fn eat(self) -> ParseRes<(Token, TokenList<'a>)> {
-        let tok = self.ptr.first().ok_or(Eof)?.clone();
+        let tok = self.ptr.first().ok_or(ParseError::new(Eof))?.clone();
         Ok((
             tok,
             TokenList {
@@ -76,7 +85,7 @@ impl<'a> TokenList<'a> {
     }
     pub fn next(self) -> ParseRes<TokenList<'a>> {
         if self.empty() {
-            Err(Eof)
+            Err(ParseError::new(Eof))
         } else {
             Ok(TokenList {
                 ptr: &self.ptr[1..],
@@ -88,7 +97,7 @@ impl<'a> TokenList<'a> {
         if next == tok {
             Ok(remaining)
         } else {
-            Err(ExpectedTok(tok, next))
+            Err(ParseError::new(ExpectedTok(tok, next)))
         }
     }
     // pub fn lookahead(&self, n: usize) -> ParseRes<Token> {
@@ -99,18 +108,19 @@ impl<'a> TokenList<'a> {
     }
 }
 
-fn parse_lit(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
+fn parse_lit_or_ident(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     let (next, remaining) = toks.eat()?;
     match next {
-        Token::Int(i) => Ok((Int(i), remaining)),
+        Token::IntLit(i) => Ok((Int(i), remaining)),
         Token::True => Ok((Bool(true), remaining)),
         Token::False => Ok((Bool(false), remaining)),
-        found => Err(ExpectedExpr(found)),
+        Token::Ident(name) => Ok((Ident(name), remaining)),
+        found => Err(ParseError::new(ExpectedExpr(found))),
     }
 }
 
 fn parse_mult_div_mod(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
-    let (left, remaining) = parse_lit(toks)?;
+    let (left, remaining) = parse_lit_or_ident(toks)?;
     let next_res = remaining.peek();
     if next_res.is_ok() {
         match next_res.unwrap() {
@@ -224,18 +234,31 @@ fn parse_if(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
     )
 }
 
+fn parse_let(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
+    let (next, remaining) = toks.eat()?;
+    match next {
+        Token::Ident(name) => {
+            let remaining = remaining.expect(Token::AssignEq)?;
+            let (value, remaining) = parse_expr(remaining)?;
+            Ok((Assign(name.clone(), value), remaining))
+        }
+        tok => Err(ParseError::new(ExpectedIdent(tok))),
+    }
+}
+
 fn parse_stmt(toks: TokenList) -> ParseRes<(Statement, TokenList)> {
     let (tok, rem) = toks.eat()?;
     Ok(match tok {
         Token::If => parse_if(rem)?,
         Token::For => todo!(),
         Token::Do => todo!(),
+        Token::Let => parse_let(rem)?,
         Token::Ident(_) => todo!("variable equals, func call"),
         Token::Print => {
             let (expr, rem) = parse_expr(rem)?;
             (Print(expr), rem)
         }
-        tok => Err(ParseError::ExpectedStatement(tok))?,
+        tok => Err(ParseError::new(ExpectedStatement(tok)))?,
     })
 }
 

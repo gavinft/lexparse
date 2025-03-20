@@ -1,8 +1,8 @@
 use expect_with::ExpectWith;
 
 use self::charlist::CharList;
-use crate::token::Token;
-use std::{collections::HashMap, rc::Rc};
+use crate::{error::BacktracedError, token::Token};
+use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 mod charlist {
     use std::{ops::Deref, rc::Rc};
@@ -74,6 +74,22 @@ mod charlist {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum LexErrorKind {
+    UnclosedStringLit
+}
+
+impl Display for LexErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LexErrorKind::UnclosedStringLit => write!(f, "The string literal is missing a closing quotation mark"),
+        }
+    }
+}
+
+pub type LexError = BacktracedError<LexErrorKind>;
+pub type LexRes<T> = Result<T, LexError>;
+
 enum EatResult {
     Chars(CharList),
     Token(Token),
@@ -105,6 +121,25 @@ fn matches_tok(text: &mut &str, tok: &str) -> bool {
         *text = &text[tok.len()..];
         true
     }
+}
+
+/**
+ * reads characters until closing quotes are seen. Assumes the opening quotes have already been read.
+ */
+fn eat_str_lit(text: &mut &str) -> LexRes<Rc<str>> {
+    let mut lit_slice: Option<&str> = None;
+    // find slice that contains the literal
+    for (i, chr) in text.chars().enumerate() {
+        if chr == '"' {
+            // save this lit slice
+            lit_slice = Some(&text[..i]);
+            // update text pointer
+            *text = &text[i + 1..];
+            break;
+        }
+    }
+    // if we found slice, return, otherwise give error
+    lit_slice.ok_or_else(|| LexError::new(LexErrorKind::UnclosedStringLit)).map(|slice| Rc::from(slice))
 }
 
 fn eat_int_lit(text: &mut &str) -> Option<i64> {
@@ -155,7 +190,7 @@ fn peek_whitespace(text: &str) -> bool {
     ch.is_whitespace()
 }
 
-fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> EatResult {
+fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> LexRes<EatResult> {
     let int_lit = if ignore_int_lit {
         // Only checks if this is an int lit if we are supposed to
         None
@@ -163,9 +198,9 @@ fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> EatResult {
         eat_int_lit(text)
     };
 
-    if let Some(num) = int_lit {
+    Ok(if let Some(num) = int_lit {
         // Check if this is an int lit
-        EatResult::Token(Token::Int(num))
+        EatResult::Token(Token::IntLit(num))
     } else if matches_tok(text, "+") {
         // Check if this is a character token
         EatResult::Token(Token::Plus)
@@ -187,6 +222,10 @@ fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> EatResult {
         EatResult::Token(Token::GE)
     } else if matches_tok(text, ">") {
         EatResult::Token(Token::GT)
+    } else if matches_tok(text, "=") {
+        EatResult::Token(Token::AssignEq)
+    } else if matches_tok(text, "\"") {
+        EatResult::Token(Token::StringLit(eat_str_lit(text)?))
     } else {
         let ch = text
             .chars()
@@ -200,7 +239,7 @@ fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> EatResult {
             EatResult::Chars(CharList::new(ch))
         } else {
             // Process next token
-            let next = eat_rec(text, true);
+            let next = eat_rec(text, true)?;
             // if next token was a character, prepend this one to the string. otherwise, reset pointer and just return this character
             match next {
                 EatResult::Chars(char_list) => EatResult::Chars(char_list.push(ch)),
@@ -212,14 +251,14 @@ fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> EatResult {
                 }
             }
         }
-    }
+    })
 }
 
 /**
  * Consumes the next token in text
  */
-fn eat(text: &mut &str, words: &HashMap<&str, Token>) -> Token {
-    match eat_rec(text, false) {
+fn eat(text: &mut &str, words: &HashMap<&str, Token>) -> LexRes<Token> {
+    Ok(match eat_rec(text, false)? {
         EatResult::Chars(word_chars) => {
             // turn the char list into a string
             let word = word_chars.implode();
@@ -231,13 +270,13 @@ fn eat(text: &mut &str, words: &HashMap<&str, Token>) -> Token {
         }
         // just return the token
         EatResult::Token(token) => token,
-    }
+    })
 }
 
 /**
  * Turns text into a string of tokens
  */
-pub fn lex(text: String, words: &HashMap<&str, Token>) -> Vec<Token> {
+pub fn lex(text: String, words: &HashMap<&str, Token>) -> LexRes<Vec<Token>> {
     // list of tokens for saving each iteration
     let mut tokens: Vec<Token> = Vec::new();
     // cursor that points to where we currently are in the input text
@@ -248,17 +287,18 @@ pub fn lex(text: String, words: &HashMap<&str, Token>) -> Vec<Token> {
         // eat the next token
         let tok = eat(&mut pointer, words);
         // add to list
-        tokens.push(tok);
+        tokens.push(tok?);
         // consume any whitespace after token
         pointer = consume_whitespace(pointer);
     }
 
     // return the list
-    tokens
+    Ok(tokens)
 }
 
 pub fn default_word_map() -> HashMap<&'static str, Token> {
     HashMap::from([
+        ("let", Token::Let),
         ("if", Token::If),
         ("then", Token::Then),
         ("else", Token::Else),
@@ -266,6 +306,8 @@ pub fn default_word_map() -> HashMap<&'static str, Token> {
         ("for", Token::For),
         ("do", Token::Do),
         ("done", Token::Done),
+        ("while", Token::While),
+        ("finish", Token::Finish),
         ("print", Token::Print),
         ("true", Token::True),
         ("false", Token::False),

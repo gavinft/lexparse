@@ -4,6 +4,7 @@ use std::rc::Rc;
 pub enum Statement {
     Print(Expr),
     If(Expr, Box<Statement>, Option<Box<Statement>>),
+    Assign(Rc<str>, Expr),
     BlockStmt(Box<Block>),
 }
 

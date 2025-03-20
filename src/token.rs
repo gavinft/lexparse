@@ -10,6 +10,8 @@ pub enum Token {
     For,
     Do,
     Done,
+    While,
+    Finish,
     Plus,
     Minus,
     Asterisk,
@@ -20,10 +22,13 @@ pub enum Token {
     EQ,
     GE,
     GT,
+    Let,
+    AssignEq,
     Semicol,
     True,
     False,
-    Int(i64),
+    IntLit(i64),
+    StringLit(Rc<str>),
     Ident(Rc<str>),
 }
 
@@ -40,7 +45,7 @@ impl Token {
             Token::Done => "Done",
             Token::Plus => "Plus",
             Token::Semicol => "Semicol",
-            Token::Int(_) => "Int",
+            Token::IntLit(_) => "Int",
             Token::Ident(_) => "Identity",
             Token::Minus => "Minus",
             Token::Asterisk => "Asterisk",
@@ -53,6 +58,11 @@ impl Token {
             Token::EQ => "Equal To",
             Token::GE => "Greater Than or Equal To",
             Token::GT => "Greater Than",
+            Token::Let => "Let",
+            Token::AssignEq => "Assignment Equals",
+            Token::While => "While",
+            Token::Finish => "Finish",
+            Token::StringLit(_) => "String Literal",
         }
     }
 }
