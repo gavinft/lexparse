@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::ast::Block;
 use crate::ast::Expr::{self, *};
-use crate::ast::Statement::{self, *};
+use crate::ast::Statement::*;
 use crate::error::BacktracedError;
 
 #[derive(Debug, Clone, Hash)]
@@ -45,6 +45,7 @@ impl TryIntoWith<InterpRes<Type>, &InterpreterState> for &Expr {
                 HalfIf(..) => Type::Unit,
                 FullIf(_, _, else_clause_expr) => else_clause_expr.try_into_with(state)?,
                 Assign(..) => Type::Unit,
+                Reassign(..) => Type::Unit,
                 BlockStmt(exprs) => exprs
                     .last()
                     .map(|e| e.try_into_with(state))
@@ -58,17 +59,23 @@ impl TryIntoWith<InterpRes<Type>, &InterpreterState> for &Expr {
 pub enum RuntimeErrorKind {
     TypeMismatch(Type, Type),
     InvalidVariableName(Rc<str>),
+    UnknownIdentAssignment(Rc<str>),
 }
 
 impl Display for RuntimeErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::TypeMismatch(expected, received) => write!(
-                f,
-                "Type mismatch: expected {expected:?}, received {received:?}"
-            ),
+            Self::TypeMismatch(expected, received) => {
+                write!(
+                    f,
+                    "Type mismatch: expected {expected:?}, received {received:?}"
+                )
+            }
             Self::InvalidVariableName(name) => {
                 write!(f, "Invalid variable name \"{name}\"")
+            }
+            Self::UnknownIdentAssignment(name) => {
+                write!(f, "There is no variable with name \"{name}\"")
             }
         }
     }
@@ -261,6 +268,15 @@ impl InterpreterState {
                     let (resolved_expr, mut state) = state.resolve_expr(expr)?;
                     state.vars.insert(name.clone(), resolved_expr);
                     Ok((Unit, state))
+                }
+                Reassign(name, expr) => {
+                    if !state.vars.contains_key(name) {
+                        Err(RuntimeError::new(RuntimeErrorKind::UnknownIdentAssignment(name.clone())))
+                    } else {
+                        let (resolved_expr, mut state) = state.resolve_expr(expr)?;
+                        state.vars.insert(name.clone(), resolved_expr);
+                        Ok((Unit, state))
+                    }
                 }
             }
         } else {

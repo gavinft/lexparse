@@ -6,6 +6,7 @@ pub enum Statement {
     HalfIf(Expr, Expr, Option<Expr>),
     FullIf(Expr, Expr, Expr),
     Assign(Rc<str>, Expr),
+    Reassign(Rc<str>, Expr),
     BlockStmt(Box<Block>),
 }
 

@@ -3,6 +3,7 @@ use crate::ast::{Expr::*, Statement::*, *};
 use crate::error::BacktracedError;
 use crate::token::Token;
 use std::fmt::Display;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum ParseErrorKind {
@@ -103,9 +104,12 @@ impl<'a> TokenList<'a> {
             Err(ParseError::new(ExpectedTok(tok, next)))
         }
     }
-    // pub fn lookahead(&self, n: usize) -> ParseRes<Token> {
-    //     self.ptr.get(n).map(|t| t.clone()).ok_or(Eof)
-    // }
+    pub fn lookahead(&self, n: usize) -> ParseRes<Token> {
+        self.ptr
+            .get(n)
+            .map(|t| t.clone())
+            .ok_or(ParseError::new(Eof))
+    }
     pub fn empty(&self) -> bool {
         self.ptr.len() < 1
     }
@@ -199,6 +203,37 @@ fn parse_comp(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     }
 }
 
+fn parse_block<'a>(
+    toks: TokenList<'a>,
+    closing_toks: Option<&[Token]>,
+) -> ParseRes<(Statement, TokenList<'a>)> {
+    let mut statements = Vec::new();
+    let mut rem_toks = toks;
+
+    fn should_continue(rem_toks: &TokenList, closing_toks: Option<&[Token]>) -> bool {
+        dbg!(rem_toks.empty());
+        dbg!(closing_toks);
+        dbg!(rem_toks.peek());
+
+        !rem_toks.empty()
+            && if let Some(closing_toks) = closing_toks {
+                !closing_toks.contains(&rem_toks.peek().expect("rem_toks shouldn't be empty"))
+            } else {
+                true
+            }
+    }
+
+    while should_continue(&rem_toks, closing_toks) {
+        println!("continuing");
+        let (stmt, remaining) = parse_stmt(rem_toks)?;
+        println!("parsed statement: {stmt:?}");
+        statements.push(stmt);
+        rem_toks = remaining;
+    }
+
+    Ok((BlockStmt(statements.into()), rem_toks))
+}
+
 fn parse_if(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     let (guard, remaining) = parse_expr(toks)?;
     let remaining = remaining.expect(Token::Then)?;
@@ -270,6 +305,12 @@ fn parse_let(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     }
 }
 
+fn parse_reassign<'a>(name: &Rc<str>, toks: TokenList<'a>) -> ParseRes<(Expr, TokenList<'a>)> {
+    // name and equals sign have already been eaten, so we need to parse the expr that this will be equivalent to
+    let (new_value, remaining) = parse_expr(toks)?;
+    Ok((Stmt(Box::new(Reassign(name.clone(), new_value))), remaining))
+}
+
 fn parse_stmt(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     let tok = toks.peek()?;
     Ok(match tok {
@@ -277,7 +318,17 @@ fn parse_stmt(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
         Token::For => todo!(),
         Token::Do => todo!(),
         Token::Let => parse_let(toks.next()?)?,
-        // Token::Ident(_) => todo!("variable equals, func call"), // TODO: implement reassignment (function call can be parse_expr)
+        Token::Ident(name) => {
+            let next_res = toks.lookahead(1);
+            if let Ok(next) = next_res {
+                match next {
+                    Token::AssignEq => parse_reassign(&name, toks.next()?.next()?)?,
+                    _ => parse_comp(toks)?,
+                }
+            } else {
+                parse_comp(toks)?
+            }
+        }
         Token::Print => {
             let (expr, rem) = parse_expr(toks.next()?)?;
             (Stmt(Box::new(Print(expr))), rem)
@@ -289,37 +340,6 @@ fn parse_stmt(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
 
 fn parse_expr(toks: TokenList) -> ParseRes<(Expr, TokenList)> {
     parse_stmt(toks)
-}
-
-fn parse_block<'a>(
-    toks: TokenList<'a>,
-    closing_toks: Option<&[Token]>,
-) -> ParseRes<(Statement, TokenList<'a>)> {
-    let mut statements = Vec::new();
-    let mut rem_toks = toks;
-
-    fn should_continue(rem_toks: &TokenList, closing_toks: Option<&[Token]>) -> bool {
-        dbg!(rem_toks.empty());
-        dbg!(closing_toks);
-        dbg!(rem_toks.peek());
-
-        !rem_toks.empty()
-            && if let Some(closing_toks) = closing_toks {
-                !closing_toks.contains(&rem_toks.peek().expect("rem_toks shouldn't be empty"))
-            } else {
-                true
-            }
-    }
-
-    while should_continue(&rem_toks, closing_toks) {
-        println!("continuing");
-        let (stmt, remaining) = parse_stmt(rem_toks)?;
-        println!("parsed statement: {stmt:?}");
-        statements.push(stmt);
-        rem_toks = remaining;
-    }
-
-    Ok((BlockStmt(statements.into()), rem_toks))
 }
 
 pub fn parse(toks: &[Token]) -> ParseRes<Expr> {
