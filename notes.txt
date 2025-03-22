@@ -1,0 +1,25 @@
+future syntax:
+
+for i = 0 to 10 by 2 do
+    ...
+done
+
+for i = 10 downto 0 by -1 do
+    ...
+done
+
+for i in list do
+    ...
+done
+
+while|until true loop
+    ...
+finish
+
+loop
+    ...
+while|until true
+
+proc Name(param1: t1, param2: t2): t3 is
+    ...
+end
