@@ -12,8 +12,7 @@ portions for things like game objects or components.
   * Comparing (less than, less than or equal, equal, etc.)
 * If/else if/else statement
   * If the if statement covers all cases (has an else clause) then it can return a value
-* Variable assignment (`let var = expression`)
-  * There's no reassignment yet, but with the current implementation you can just assign twice
+* Variable assignment and reassignment (`let var = expression`, `var = new_expression`)
 
 ## Example
 
@@ -25,6 +24,10 @@ print hello
 print word
 
 let var = if true then 5 else 6 fi
+print "var:"
+print var
+
+var = if hello + hello > var then "meow" else "woof" fi
 print "var:"
 print var
 ```
