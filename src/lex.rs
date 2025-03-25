@@ -194,6 +194,9 @@ fn peek_whitespace(text: &str) -> bool {
     ch.is_whitespace()
 }
 
+/**
+ * ignore_int_lit: ignores int literals. should only be true if mid parsing an identifier so that it can have digits in the name
+ */
 fn eat_rec(text: &mut &str, ignore_int_lit: bool) -> LexRes<EatResult> {
     let int_lit = if ignore_int_lit {
         // Only checks if this is an int lit if we are supposed to
